@@ -34,11 +34,15 @@ Architecture:
 
 from __future__ import annotations
 
+import os
 import sys
 import math
 import time
 import ctypes
 import ctypes.wintypes
+
+# Prevent SDL2 from minimizing overlay window when switching focus to CS2
+os.environ["SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS"] = "0"
 
 if sys.platform == "win32":
     try:
@@ -80,11 +84,12 @@ from world_to_screen import Vector2
 
 GWL_EXSTYLE       = -20
 
-# These three flags together create the transparent, click-through, topmost window
+# These flags together create the transparent, click-through, topmost window
 WS_EX_LAYERED     = 0x00080000   # enables transparency / colorkey
 WS_EX_TRANSPARENT = 0x00000020   # mouse events fall through to window below
 WS_EX_TOPMOST     = 0x00000008   # always renders above all other windows
 WS_EX_TOOLWINDOW  = 0x00000080   # hidden from Alt-Tab and taskbar
+WS_EX_NOACTIVATE  = 0x08000000   # prevents window from taking focus or being deactivated
 
 # SetLayeredWindowAttributes — colorkey mode
 LWA_COLORKEY      = 0x00000001   # treat one colour as fully transparent
@@ -163,16 +168,24 @@ class Overlay:
 
     def _apply_win32_styles(self) -> None:
         """
-        Find the pygame SDL window by class/caption and apply the four
-        extended styles that make it transparent and click-through.
+        Find the pygame SDL window and apply extended styles that make
+        it transparent, non-activating, click-through, and permanently topmost.
         """
-        pygame.display.set_caption("__overlay__")           # temporary unique title
-        time.sleep(0.1)                                      # let Windows register it
-        hwnd = win32gui.FindWindow(None, "__overlay__")
+        hwnd = 0
+        try:
+            hwnd = pygame.display.get_wm_info().get("window", 0)
+        except Exception:
+            pass
+
+        if not hwnd:
+            pygame.display.set_caption("__overlay__")           # temporary unique title
+            time.sleep(0.1)                                      # let Windows register it
+            hwnd = win32gui.FindWindow(None, "__overlay__")
+            pygame.display.set_caption("Telemetry Overlay")     # restore caption
+
         if hwnd == 0:
             raise RuntimeError("Could not find overlay HWND. Win32 setup failed.")
         self._hwnd = hwnd
-        pygame.display.set_caption("Telemetry Overlay")     # restore caption
 
         # Read current extended style bits
         ex_style = win32gui.GetWindowLong(hwnd, GWL_EXSTYLE)
@@ -182,7 +195,8 @@ class Overlay:
                         | WS_EX_LAYERED
                         | WS_EX_TRANSPARENT    # click-through: passes mouse events down
                         | WS_EX_TOPMOST        # always on top
-                        | WS_EX_TOOLWINDOW)    # hidden from taskbar / Alt-Tab
+                        | WS_EX_TOOLWINDOW     # hidden from taskbar / Alt-Tab
+                        | WS_EX_NOACTIVATE)    # never steal or lose focus
 
         # Apply the extended style
         win32gui.SetWindowLong(hwnd, GWL_EXSTYLE, new_ex_style)
@@ -201,9 +215,9 @@ class Overlay:
         win32gui.SetWindowPos(
             hwnd, win32con.HWND_TOPMOST,
             0, 0, self.screen_w, self.screen_h,
-            win32con.SWP_SHOWWINDOW,
+            win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE | win32con.SWP_FRAMECHANGED,
         )
-        print(f"[+] Overlay HWND: {hex(hwnd)}  |  WS_EX_LAYERED | WS_EX_TRANSPARENT | HWND_TOPMOST applied")
+        print(f"[+] Overlay HWND: {hex(hwnd)}  |  WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | HWND_TOPMOST applied")
 
     def _position_over_target(self) -> None:
         """
@@ -225,7 +239,7 @@ class Overlay:
                 win32gui.SetWindowPos(
                     self._hwnd, win32con.HWND_TOPMOST,
                     x, y, w, h,
-                    win32con.SWP_SHOWWINDOW,
+                    win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE,
                 )
                 print(f"[+] Overlay positioned over '{self.target_title}' at ({x},{y}) size {w}×{h}")
                 return
@@ -234,7 +248,7 @@ class Overlay:
         win32gui.SetWindowPos(
             self._hwnd, win32con.HWND_TOPMOST,
             0, 0, self.screen_w, self.screen_h,
-            win32con.SWP_SHOWWINDOW,
+            win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE,
         )
 
     # ── Drawing helpers ─────────────────────────────────────────────────────
@@ -303,13 +317,16 @@ class Overlay:
             """Projects 3D normalized model coordinates (forward, right, down) to 2D screen."""
             px = int(sx + (xf * sin_a + yr * cos_a) * w_scale)
             py = int(top + zd * h)
+            # Clamp to prevent SDL line rasterization wrapping/flickering
+            px = max(-100, min(self.screen_w + 100, px))
+            py = max(-100, min(self.screen_h + 100, py))
             return px, py
 
         if not is_crouching:
             # ── Standing posture ─────────────────────────────────────────────
             head_cx = int(sx + 0.04 * sin_a * w_scale)
             head_cy = top + max(2, int(h * 0.09))
-            head_radius = max(2, min(w // 6, int(h * 0.05)))
+            head_radius = max(2, min(min(w // 6, int(h * 0.05)), 40))
 
             # Torso: 1 single segment from neck to pelvis
             torso_top = proj(0.02, 0.0, 0.17)
@@ -336,7 +353,7 @@ class Overlay:
             # Lower center of gravity, forward torso tilt, flexed knees
             head_cx = int(sx + 0.22 * sin_a * w_scale)
             head_cy = top + max(2, int(h * 0.14))
-            head_radius = max(2, min(w // 6, int(h * 0.05)))
+            head_radius = max(2, min(min(w // 6, int(h * 0.05)), 40))
 
             # Torso: 1 single segment leaning forward in squat
             torso_top = proj(0.18, 0.0, 0.24)
@@ -359,6 +376,8 @@ class Overlay:
             foot_r = proj(-0.14, 0.32, 0.98)
 
         # 1. Head circle
+        head_cx = max(-100, min(self.screen_w + 100, head_cx))
+        head_cy = max(-100, min(self.screen_h + 100, head_cy))
         head_center = (head_cx, head_cy)
         pygame.draw.circle(self.screen, color, head_center, head_radius, line_w)
 
@@ -380,10 +399,11 @@ class Overlay:
         pygame.draw.line(self.screen, color, knee_r, foot_r, line_w)
 
         # Articulated joint markers (discreti ed eleganti)
-        if h >= 35:
+        if 35 <= h <= int(self.screen_h * 1.2):
             joints = [torso_top, torso_bot, elbow_l, hand_l, elbow_r, hand_r, knee_l, foot_l, knee_r, foot_r]
             for jx, jy in joints:
-                pygame.draw.circle(self.screen, (255, 255, 255), (jx, jy), max(1, line_w))
+                if 0 <= jx <= self.screen_w and 0 <= jy <= self.screen_h:
+                    pygame.draw.circle(self.screen, (255, 255, 255), (jx, jy), max(1, line_w))
 
     def _draw_body_contour(self, sx: int, sy: int, color: tuple,
                            w: int = BOX_WIDTH, h: int = BOX_HEIGHT, thickness: int = 2,
@@ -521,8 +541,9 @@ class Overlay:
             pygame.draw.lines(self.screen, color, True, pts, max(1, thickness))
 
     def _draw_health_bar(self, sx: int, sy: int, health: int, w: int = BOX_WIDTH, h: int = BOX_HEIGHT) -> None:
-        """Draw a vertical health bar to the left of the ESP box."""
-        bar_x = sx - w // 2 - HEALTH_BAR_W - 3
+        """Draw a vertical health bar and health percentage text with an offset to the left of the ESP box."""
+        hp = max(0, min(health, 100))
+        bar_x = sx - w // 2 - HEALTH_BAR_W - 4
         bar_y = sy - h // 2
 
         # Background (dark)
@@ -530,14 +551,24 @@ class Overlay:
         pygame.draw.rect(self.screen, COLOR_HEALTH_BG, bg_rect)
 
         # Filled portion (proportional to health / 100)
-        fill_h   = int(h * max(0, min(health, 100)) / 100)
+        fill_h   = int(h * hp / 100)
         fill_y   = bar_y + (h - fill_h)
         fill_rect = pygame.Rect(bar_x, fill_y, HEALTH_BAR_W, fill_h)
 
         # Colour shifts red→yellow→green based on health
-        r = int(255 * (1.0 - health / 100.0))
-        g = int(255 * (health / 100.0))
+        r = int(255 * (1.0 - hp / 100.0))
+        g = int(255 * (hp / 100.0))
         pygame.draw.rect(self.screen, (r, g, 30), fill_rect)
+
+        # Draw health percentage text offset to the left of the health bar
+        hp_str = f"{hp}%"
+        surf_shadow = self.font_small.render(hp_str, True, (0, 0, 0))
+        surf_hp = self.font_small.render(hp_str, True, (r, g, 60))
+        text_x = bar_x - surf_hp.get_width() - 3
+        text_y = fill_y - surf_hp.get_height() // 2 if h > 25 else bar_y
+        text_y = max(bar_y - 2, min(bar_y + h - surf_hp.get_height() + 2, text_y))
+        self.screen.blit(surf_shadow, (text_x + 1, text_y + 1))
+        self.screen.blit(surf_hp, (text_x, text_y))
 
     def _draw_label(self, sx: int, sy: int, text: str, h: int = BOX_HEIGHT) -> None:
         """Render a text label above the box."""
@@ -605,7 +636,8 @@ class Overlay:
                 self._draw_stylized_skeleton(sx, sy, skel_color, w, h, is_crouching=is_crouching, aspect_angle_deg=aspect_angle)
             self._draw_health_bar(sx, sy, ent.get("health", 100), w, h)
             label = ent.get("name") or ent.get("team_name", "?")
-            self._draw_label(sx, sy, label, h)
+            hp = ent.get("health", 100)
+            self._draw_label(sx, sy, f"{label} [{hp}%]", h)
             if "distance" in ent:
                 self._draw_distance(sx, sy, ent["distance"], h)
 
@@ -613,10 +645,12 @@ class Overlay:
 
         # Reassert HWND_TOPMOST so overlay stays on top when CS2 receives input
         if self._hwnd:
+            if win32gui.IsIconic(self._hwnd):
+                win32gui.ShowWindow(self._hwnd, win32con.SW_RESTORE)
             win32gui.SetWindowPos(
                 self._hwnd, win32con.HWND_TOPMOST,
                 0, 0, 0, 0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW
             )
 
     def process_events(self) -> bool:
@@ -692,33 +726,45 @@ def run_overlay(screen_w: int = 1920, screen_h: int = 1080,
 
             entities = []
             for player in players:
-                # Skip local player (don't draw ESP on self)
-                if local and player.name == local.name:
+                # Skip local player (don't draw ESP on self - camera is at local player eyes)
+                if local:
+                    dx = player.origin.x - local.origin.x
+                    dy = player.origin.y - local.origin.y
+                    dz = player.origin.z - local.origin.z
+                    if (dx * dx + dy * dy + dz * dz) < 625.0 or (player.name and player.name == local.name):
+                        continue
+
+                # Only show alive, initialized players
+                if not player.is_alive or player.health <= 0:
                     continue
-                # Only show alive players
-                if not player.is_alive:
+                if player.origin.x == 0.0 and player.origin.y == 0.0 and player.origin.z == 0.0:
                     continue
 
-                # Project world origin (feet) and head (+72 units Z)
+                # Project world origin (feet) and head
                 wp_feet = WV3(player.origin.x, player.origin.y, player.origin.z)
                 sp_feet = world_to_screen(wp_feet, view_matrix, screen_w, screen_h)
                 if sp_feet is None:
                     continue
 
-                head_z = 54.0 if player.is_crouching else 72.0
+                head_z = 58.0 if player.is_crouching else 75.0
                 wp_head = WV3(player.origin.x, player.origin.y, player.origin.z + head_z)
                 sp_head = world_to_screen(wp_head, view_matrix, screen_w, screen_h)
+                if sp_head is None:
+                    continue
 
-                if sp_head is not None:
-                    box_h = int(abs(sp_feet.y - sp_head.y))
-                    box_w = max(10, int(box_h * 0.5))
-                    center_x = int(sp_feet.x)
-                    center_y = int(min(sp_feet.y, sp_head.y) + box_h // 2)
-                else:
-                    box_h = BOX_HEIGHT
-                    box_w = BOX_WIDTH
-                    center_x = int(sp_feet.x)
-                    center_y = int(sp_feet.y - BOX_HEIGHT // 2)
+                box_h = int(abs(sp_feet.y - sp_head.y))
+                # Validate reasonable height bounds (prevent near-camera coordinate explosion / flickering streaks)
+                if box_h < 8 or box_h > int(screen_h * 1.5):
+                    continue
+
+                box_w = max(6, int(box_h * 0.52))
+                center_x = int((sp_feet.x + sp_head.x) / 2)
+                center_y = int((sp_feet.y + sp_head.y) / 2)
+
+                # Cull entities completely outside the screen viewport
+                if (center_x + box_w // 2 < -50 or center_x - box_w // 2 > screen_w + 50 or
+                    center_y + box_h // 2 < -50 or center_y - box_h // 2 > screen_h + 50):
+                    continue
 
                 # Compute distance and aspect angle from local observer to entity
                 dist = 0.0

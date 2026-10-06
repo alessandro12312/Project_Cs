@@ -241,6 +241,10 @@ class CS2Telemetry:
             if pawn_ptr == 0:
                 return None
 
+            # Skip local player pawn if known
+            if hasattr(self, "_local_pawn_ptr") and pawn_ptr == self._local_pawn_ptr:
+                return None
+
             # ── D: read pawn properties ──────────────────────────────────
             scene_node_ptr = self._ptr(pawn_ptr + C_BaseEntity.m_pGameSceneNode)
             if scene_node_ptr == 0:
@@ -249,6 +253,13 @@ class CS2Telemetry:
             origin     = Vector3.read(self.pm, scene_node_ptr + CGameSceneNode.m_vecAbsOrigin)
             health     = self.pm.read_int(pawn_ptr + C_BaseEntity.m_iHealth)
             life_state = self.pm.read_bytes(pawn_ptr + C_BaseEntity.m_lifeState, 1)[0]
+
+            # Filter uninitialized coordinates, dead or invalid pawns
+            if origin.x == 0.0 and origin.y == 0.0 and origin.z == 0.0:
+                return None
+            if health <= 0 or life_state != 0:
+                return None
+
             team       = self.pm.read_bytes(pawn_ptr + C_BaseEntity.m_iTeamNum, 1)[0]
             flags      = self.pm.read_uint(pawn_ptr + C_BaseEntity.m_fFlags)
             velocity   = Vector3.read(self.pm, pawn_ptr + C_BaseEntity.m_vecVelocity)
@@ -280,6 +291,12 @@ class CS2Telemetry:
         alive_only : if True, skip dead / spectating players.
         """
         try:
+            # Refresh local player pawn pointer to ensure self is skipped during entity scan
+            try:
+                self._local_pawn_ptr = self._ptr(self.client_base + ClientDll.dwLocalPlayerPawn)
+            except Exception:
+                self._local_pawn_ptr = 0
+
             entity_list_base = self._entity_list_base()
             if entity_list_base == 0:
                 return []
@@ -308,6 +325,7 @@ class CS2Telemetry:
             pawn_ptr = self._ptr(self.client_base + ClientDll.dwLocalPlayerPawn)
             if pawn_ptr == 0:
                 return None
+            self._local_pawn_ptr = pawn_ptr
 
             scene_node_ptr = self._ptr(pawn_ptr + C_BaseEntity.m_pGameSceneNode)
             if scene_node_ptr == 0:

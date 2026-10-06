@@ -1,11 +1,11 @@
 """
 cs2_offsets.py
 ──────────────
-Auto-generated from the user's cs2-dumper files:
-  offsets.cs        (2026-10-06 06:58:22 UTC)
-  client_dll.cs     (2026-10-06 06:58:22 UTC)
+Auto-generated from cs2-dumper files via update_offsets.py
+Commit / Info: 4116de00 (2026-10-06T09:12:36Z) - Merge pull request #691 from Enoouo/main
+Generated at:  2026-10-06 20:22:19 UTC
 
-DO NOT edit by hand — re-run the dumper and regenerate this file.
+DO NOT edit by hand — run python update_offsets.py to regenerate.
 All values are integer byte offsets (hex).
 """
 
@@ -63,6 +63,17 @@ class Engine2Dll:
     dwWindowWidth                         = 0x91F330
 
 
+class Buttons:
+    """Static button offsets in client.dll."""
+    attack                                = 0x2231FD0
+    attack2                               = 0x2232060
+    jump                                  = 0x22324E0
+    duck                                  = 0x2232570
+    forward                               = 0x2232210
+    back                                  = 0x22322A0
+    left                                  = 0x2232330
+    right                                 = 0x22323C0
+
 # ══════════════════════════════════════════════════════════════════════════════
 # client_dll.cs  →  Field offsets within C++ objects
 # These are offsets FROM the start of an object instance to a member field.
@@ -73,12 +84,12 @@ class C_BaseEntity:
     Source: client_dll.cs — C_BaseEntity (and C_BasePlayerPawn which inherits it)
     Field offsets relative to the entity object pointer.
     """
-    m_pGameSceneNode = 0x330    # CGameSceneNode*  (line 2398 in client_dll.cs)
-    m_iHealth        = 0x34C    # int32            (line 2402)
-    m_lifeState      = 0x354    # uint8  (0=alive) (line 2404)
-    m_iTeamNum       = 0x3E7    # uint8  (2=T,3=CT)(line 2435)
-    m_fFlags         = 0x3F4    # uint32 (bit 1 = FL_DUCKING) (line 2438)
-    m_vecVelocity    = 0x430    # CNetworkVelocityVector → 3×float (line 2441)
+    m_pGameSceneNode = 0x330    # CGameSceneNode*
+    m_iHealth        = 0x34C    # int32
+    m_lifeState      = 0x354    # uint8  (0=alive)
+    m_iTeamNum       = 0x3E7    # uint8  (2=T,3=CT)
+    m_fFlags         = 0x3F4    # uint32 (bit 1 = FL_DUCKING)
+    m_vecVelocity    = 0x430    # CNetworkVelocityVector → 3×float
 
 
 class CGameSceneNode:
@@ -86,7 +97,7 @@ class CGameSceneNode:
     Source: client_dll.cs — CGameSceneNode
     Field offsets relative to the scene-node pointer.
     """
-    m_vecAbsOrigin   = 0xC8     # VectorWS / Vector3  (line 1916 in client_dll.cs)
+    m_vecAbsOrigin   = 0xC8     # VectorWS / Vector3
 
 
 class C_CSPlayerPawn:
@@ -94,7 +105,7 @@ class C_CSPlayerPawn:
     Source: client_dll.cs — C_CSPlayerPawnBase (inherits C_BasePlayerPawn)
     Player-specific fields.
     """
-    m_angEyeAngles   = 0x35F0   # QAngle  pitch/yaw/roll  (line 1829)
+    m_angEyeAngles   = 0x35F0   # QAngle  pitch/yaw/roll
 
 
 class CCSPlayerController:
@@ -102,7 +113,7 @@ class CCSPlayerController:
     Source: client_dll.cs — CCSPlayerController
     Controller (scoreboard) → Pawn linkage.
     """
-    m_hPlayerPawn    = 0x92C    # CHandle<C_CSPlayerPawn>  (line 2975)
+    m_hPlayerPawn    = 0x92C    # CHandle<C_CSPlayerPawn>
     m_iszPlayerName  = 0x6FC    # char[128] player name
     m_bPawnIsAlive   = 0x934    # bool
     m_iPawnHealth    = 0x938    # uint32

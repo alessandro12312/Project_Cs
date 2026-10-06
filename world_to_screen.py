@@ -170,13 +170,17 @@ def world_to_screen(
     clip_x, clip_y, clip_z, clip_w = view_matrix.transform(world_pos)
 
     # ── Step 2: perspective divide ────────────────────────────────────────
-    if clip_w <= 0.001:
-        # Point is behind the camera (or at the near plane).
-        # clip_w ≤ 0 means the NDC result would flip sign — discard.
+    if clip_w < 1.0:
+        # Point is behind the camera or directly on the near clipping plane (< 2.5cm).
+        # Discard to prevent division by near-zero resulting in runaway coordinates.
         return None
 
     ndc_x = clip_x / clip_w   # normalised device coordinate  x ∈ [-1, 1]
     ndc_y = clip_y / clip_w   # normalised device coordinate  y ∈ [-1, 1]
+
+    # Reject coordinates excessively far from screen bounds to prevent SDL line overflow
+    if abs(ndc_x) > 3.0 or abs(ndc_y) > 3.0:
+        return None
 
     # ── Step 3: viewport transform ────────────────────────────────────────
     screen_x = (ndc_x + 1.0) / 2.0 * screen_w
